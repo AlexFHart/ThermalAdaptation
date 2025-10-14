@@ -1,0 +1,38 @@
+### batch initialiser
+### this first script sets up a loop to generate FastQC reports for all samples:
+
+#!/bin/bash
+#SBATCH -J fastQC
+#SBATCH -A snic2022-5-546
+
+for sample in 1 2 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 61 62 63 64 65 66 67 68 70 71 72 74 75 76 77 78 19a 19b 23a 23b 27a 27b 49a 49b 4extra 53a 53b 69test 73test 76x 77x 79a 79b 83a 83b 87a 87b A1 A2
+do
+    sbatch fastQCloop.sh "$sample"
+done
+
+
+
+
+### this is for actually running FastQC
+
+#!/bin/bash -l
+#SBATCH -J fastqc_loop
+#SBATCH -A snic2022-5-546
+#SBATCH -p core 
+#SBATCH -n 4
+#SBATCH -t 01:00:00 
+
+module load bioinfo-tools
+module load FastQC/0.11.9
+
+fastqc --threads 4 \
+-o /proj/sexsel_data/snic2020-16-129_whole_project_directory/private/Stockholm_RNA_delivery06265/VD-3257/alex/FastQC/ \
+/proj/sexsel_data/snic2020-16-129_whole_project_directory/private/Stockholm_RNA_delivery06265/VD-3257/alex/samples/$1_1P \
+/proj/sexsel_data/snic2020-16-129_whole_project_directory/private/Stockholm_RNA_delivery06265/VD-3257/alex/samples/$1_2P
+
+
+
+
+
+
+
