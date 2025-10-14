@@ -2,7 +2,7 @@
 
 This is the set of scripts which comprise a pipeline from raw sequence data to gene expression analyses for an experiment on Callosobruchus maculatus adaptation to temperature extremes. 
 
-1. Initial processing via FastQC/MultiQC
+1. Initial stats via FastQC
 2. Read trimming and filtering with Trimmomatic
 3. HiSat2 reference genome index generation and subsequence read alignment to reference
 4. SAMtools processing to sort the mapped reads by co-ordinates, filter unmapped reads, and produce indexes for each library
