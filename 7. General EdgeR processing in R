@@ -1,0 +1,182 @@
+### This is the script used to pre-process count data and perform gene expression comparisons between groups. 
+### Exact code for different comparisons will have been adjusted as necessary but this is the scaffold, mostly it was just factors etc. that were changed.
+
+
+#-----------------------------------------------------------------------#
+# step 1: set-up and data input
+# setting up the work environment
+library(edgeR)
+setwd("~/Library/Mobile Documents/com~apple~CloudDocs/Documents/PostDoc Folder/Scripts & Code/edgeR Data")
+
+# reading in files
+files <- read.csv("temp_groups.csv", sep = "\t", header = TRUE)
+
+# the following code can be modified to include/exclude different groups from analysis
+# keep <- which(files$Origin == "Yemen")
+# files <- files[keep,]
+# keep <- which(files$Regime != "Switch")
+# files <- files[keep,]
+# keep <- which(files$Assay == "35")
+# files <- files[keep,]
+
+# create a counts object with EdgeR
+counts <- readDGE(files$Files, header=FALSE, labels = files$Summary, group = files$group)
+
+# whitelisting - it's labelled a blacklist, but it's the opposite
+# this code removes non-approved genes from analysis
+combo <- read.csv("~/Library/Mobile Documents/com~apple~CloudDocs/Documents/PostDoc Folder/Scripts & Code/ThermAdapt/2024/the_plan_II/phase one/combo_blacklist.csv", header = FALSE)
+
+combo <- combo$V1 # this is necessary because it only works with character vector 
+combo <- rownames(counts) %in% combo
+counts <- counts[combo,] 
+
+# cleaning up meta tags
+noint<-rownames(counts) %in% c("__no_feature", "__ambiguous", "__too_low_aQual", "__not_aligned", "__alignment_not_unique")
+counts<-counts[!noint,]
+
+# manual recalculation of library sizes
+counts$samples$lib.size <- colSums(counts$counts)
+
+#-----------------------------------------------------------------------#
+# step 1.5: design set-up
+# model design (additive model) but will need to be adjusted based on what comparison is being performed
+assays <- as.factor(files$Assay)
+regime <- as.factor(files$Regime)
+origin <- as.factor(files$Origin)
+batch <- as.factor(files$Batch)
+PC1 <- files$PC1
+
+assays <- relevel(assays, "29")
+regime <- relevel(regime, "Ancestral")
+origin <- relevel(origin, "California")
+
+design <- model.matrix(~0 + assays + regime + origin + assays*regime + assays*origin + regime*origin)
+
+#-----------------------------------------------------------------------#
+# step 2: filtering
+# filtering out very low read counts
+keep <- filterByExpr(counts, design) 
+
+counts <- counts[keep, , keep.lib.sizes=FALSE]
+
+# low CPM filtering + features in two samples or more filtering
+# default: cpm 10, countcheck 4
+countsPerMillion <- cpm(counts)
+
+countCheck <- countsPerMillion > 10
+
+keep <- which(rowSums(countCheck) >= 4) # can set to 2-3 when comparing fewer samples
+
+counts <- counts[keep,]
+
+#-----------------------------------------------------------------------#
+# step 3: library normalisation
+counts <- calcNormFactors(object = counts)
+counts <- normLibSizes(counts)
+
+#-----------------------------------------------------------------------#
+# step 4: dispersion estimation & model fitting
+# "traditional" GLM approach
+# first need some dispersions/BCVs
+counts <- estimateGLMCommonDisp(counts, design)
+counts <- estimateGLMTrendedDisp(counts, design)
+counts <- estimateGLMTagwiseDisp(counts, design)
+
+# then we can try and route around makeContrasts
+fit <- glmQLFit(counts, design, robust = TRUE)
+
+setwd("~/Library/Mobile Documents/com~apple~CloudDocs/Documents/PostDoc Folder/Scripts & Code/ThermAdapt/2024/BAAEA")
+
+# ez limma batch remover
+test <- limma::removeBatchEffect(countsPerMillion, files$Batch, design = design)
+
+# then, using either coef or contrast, pick the samples/groups from the design you want to compare:
+# example, Anc 29 vs Anc 35
+
+anc_vs_hot <- glmQLFTest(fit, contrast =  c(-1, 0, 1, 
+                                            0, 0, 
+                                            0,
+                                            0, 0, 0, 0))
+
+# example 2 -> Cold vs Anc @ 23
+
+cold_vs_anc_23 <- glmQLFTest(fit, coef = 4) # fold changes might not be in the direction you expect -> pay attention!
+
+# example 3 -> Anc vs Hot @ 35
+
+anc_vs_hot_35 <- glmQLFTest(fit, coef = 5)
+
+
+# save the results
+test_results <- anc_vs_hot_35
+write.csv(test_results, "~/Documents/Alex/github/ThermAdapt/2024/the_plan_II/23_vs_35_anc.csv")
+
+
+
+
+#-----------------------------------------------------------------------#
+
+# bonus/extra code snippets for data exploration and visualisation:
+# visualisation
+# dump in results of DE testing for quick vis; mess with settings/thresholds at your leisure
+
+de.genes <- rownames(topTags(test_results, n=1000)$table)
+plotSmear(test_results, de.tags=de.genes, pch=20, cex=0.6)
+abline(h=c(-1, 0, 1), col=c("dodgerblue","yellow","dodgerblue"), lty=2)
+# if the plotsmear function complains about input or is giving weird results, just assign test_results to the raw results of glmQLFTest and run this snippet again without the toptags and FDR filtering
+
+
+#-----------------------------------------------------------------------#
+# library size comparison
+logCPM <- cpm(counts, prior.count=2, log=TRUE)
+rownames(logCPM) <- counts$genes$Symbol
+colnames(logCPM) <- paste(rownames(counts$samples), 1:2, sep="-")
+
+o <- order(test_results$table$PValue)
+logCPM <- logCPM[o[1:1000],]
+logCPM <- t(scale(t(logCPM)))
+
+library(gplots)
+col.pan <- colorpanel(10000, "blue", "white", "red")
+heatmap.2(logCPM, col=col.pan, Rowv=TRUE, scale="none",trace="none", dendrogram="both", cexRow=1, 
+          cexCol=1.4, density.info="none",margins = c(6,6))
+
+
+#-----------------------------------------------------------------------#
+# PCA of different groups/treatments, now with colours!
+library(RColorBrewer)
+library(dichromat)
+library(ggfortify)
+
+col.ass <- c("deepskyblue", "grey", "red")[(as.factor(files$Assay))]
+col.reg <- c("grey", "deepskyblue", "red", "green")[(as.factor(files$Regime))]
+col.org <- c("darkgreen", "orange", "brown2")[(as.factor(files$Origin))]
+col.bat <- c("purple", "orange")[(as.factor(files$Batch))]
+brew <- brewer.pal(8, "Spectral")
+pal <- colorRampPalette(brew)
+files$order <- findInterval(files$PC1, sort(files$PC1))
+col.PC1 <- pal(nrow(files))[files$order]
+
+# assay
+plotMDS(counts,col=col.ass, gene.selection = "common", dim.plot = c(3,4))
+plotMDS(counts,col=col.ass, dim.plot = c(1,2))
+
+# regime
+plotMDS(counts,col=col.reg,  gene.selection = "common", dim.plot = c(1,2))
+plotMDS(counts,col=col.reg, dim.plot = c(4,5))
+
+# origin
+plotMDS(counts, gene.selection = "common", col=col.org, dim.plot = c(2,3))
+plotMDS(counts, col=col.org)
+
+# batch and PC1
+plotMDS(counts,col=col.PC1, gene.selection = "common", dim.plot = c(1,2))
+
+
+
+
+
+
+
+
+
