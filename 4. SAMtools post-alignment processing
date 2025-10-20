@@ -1,0 +1,61 @@
+### this set of scripts is for processing the files that have been output by HISAT2 into more managable file types for other programs. 
+
+### SAMtools sort: this will convert the SAM files produced by HISAT2 into BAM files which are much smaller.
+
+#!/bin/bash
+#SBATCH -J samtools_sort
+#SBATCH -A snic2022-5-546
+#SBATCH -p core 
+#SBATCH -t 01:30:00
+
+module load bioinfo-tools
+module load samtools/1.17
+
+L = $1
+
+samtools sort \
+/proj/sexsel_data/snic2020-16-129_whole_project_directory/private/Stockholm_RNA_delivery06265/VD-3257/alex/HISAT2/$1_aligned \
+-O bam \
+-o /proj/sexsel_data/snic2020-16-129_whole_project_directory/private/Stockholm_RNA_delivery06265/VD-3257/alex/sorting/sorted/$1_sorted.BAM
+
+
+### SAMtools filter: using filter, we can remove unmapped reads from the file. 
+#!/bin/bash
+#SBATCH -J samtools_filter
+#SBATCH -A snic2022-5-546
+#SBATCH -p core 
+#SBATCH -t 01:00:00
+
+module load bioinfo-tools
+module load samtools/1.17
+
+L = $1
+
+samtools view -f 3 \
+/proj/sexsel_data/snic2020-16-129_whole_project_directory/private/Stockholm_RNA_delivery06265/VD-3257/alex/sorting/sorted/$1_sorted.BAM \
+-b \
+-o /proj/sexsel_data/snic2020-16-129_whole_project_directory/private/Stockholm_RNA_delivery06265/VD-3257/alex/sorting/filtered/$1_filt.BAM
+
+
+### SAMtools index: this will produce an index for each library which speeds up further processing. 
+### Additionally, the last lines of code can be implemented to provide comprehensive library statistics.
+
+#!/bin/bash
+#SBATCH -J samtools_index+
+#SBATCH -A snic2022-5-546
+#SBATCH -p core 
+#SBATCH -t 01:00:00
+
+module load bioinfo-tools
+module load samtools/1.17
+
+L = $1
+
+samtools index -b \
+/proj/sexsel_data/snic2020-16-129_whole_project_directory/private/Stockholm_RNA_delivery06265/VD-3257/alex/sorting/filtered/$1_filtR.BAM \
+-o $1.bai
+
+# bonus: please give me the stats 
+wait
+
+samtools stats /proj/sexsel_data/snic2020-16-129_whole_project_directory/private/Stockholm_RNA_delivery06265/VD-3257/alex/sorting/filtered/$1_filtR.BAM > $1_Rstats.txt
