@@ -1,0 +1,160 @@
+### During preliminary analysis we identified a major batch effect between years that was not sufficiently dealt with by batch effect moderators such as limma's RemoveBatchEffect.
+### Thus, the following code was used to whitelist genes which were at least somewhat consistent between years for further analysis.
+
+# setup
+# import a file containing the normalised cpms of each year
+setwd("~/Library/Mobile Documents/com~apple~CloudDocs/Documents/PostDoc Folder/Scripts & Code/ThermAdapt/2024/the_plan_II/blacklist prep")
+both <- read.csv("both_years.csv")
+
+library(ggplot2)
+library(dplyr)
+
+# setting up groups/factors for easier processing
+both$Pop <- as.factor(both$Pop)
+group_data <- both %>% group_by(Origin, Regime, Assay, Batch, Pop)
+
+group_means <- group_data %>% summarise(mean_value = mean(CALMACG00000000006))
+
+gulp <- group_data %>% summarise_if(is.numeric, mean, na.rm = TRUE)
+
+
+# setting up regression -> R^2 + p-val for every gene
+# cpm (2022) x vs. cpm (2024) y
+
+gulp_2022 <- filter(gulp, Batch == "2022")
+gulp_2024 <- filter(gulp, Batch == "2024")
+
+glue <-  inner_join(gulp_2022, gulp_2024, by = c("Origin", "Regime", "Assay", "Pop"))
+# anything labelled x is 2022, y is 2024 based on the order from the input file
+
+varlist <- glue[, c("Origin", "Regime", "Assay",  "Pop")]
+glue <- subset(glue, select = -c(Batch.x, Batch.y, Origin, Regime, Assay, Pop))
+glue <- glue %>% select(order(colnames(glue)))
+glue <- cbind(varlist, glue)
+
+# single regression: 
+
+test_fit <- lm(CALMACG00000000002.x ~ CALMACG00000000002.y, data = glue)
+summ <- summary(test_fit)
+rsqu <- summary(test_fit)$adj.r.squared
+pvall <- summary(test_fit)$coef[2,4]
+
+# test loop
+
+test_glue <- glue[,5:10]
+test_results <- data.frame()
+
+for (i in seq(from=1, to=6, by=2)) {
+  x_2022 <- as.data.frame(test_glue[,i])
+  x_2022 <- unlist(x_2022)
+  y_2024 <- as.data.frame(test_glue[,i+1])
+  y_2024 <- unlist(y_2024)
+  loop_fit <- lm(x_2022 ~ y_2024)
+  loop_rsqu <- summary(loop_fit)$adj.r.squared
+  loop_pvall <- summary(loop_fit)$coef[2,4]
+  output <- c(loop_rsqu, loop_pvall)
+  test_results <- rbind(test_results, output)
+  colnames(test_results) <- c("R-squ", "p-val")
+}
+
+# now apply to real dataset
+
+real_results <- data.frame()
+
+for (i in seq(from = 5, to = 25568, by = 2)) {
+  x_2022 <- as.data.frame(glue[,i])
+  x_2022 <- unlist(x_2022)
+  y_2024 <- as.data.frame(glue[,i+1])
+  y_2024 <- unlist(y_2024)
+  loop_fit <- lm(x_2022 ~ y_2024)
+  loop_rsqu <- summary(loop_fit)$adj.r.squared
+  loop_pvall <- summary(loop_fit)$coef[2,4]
+  output <- c(loop_rsqu, loop_pvall)
+  real_results <- rbind(real_results, output)
+  colnames(real_results) <- c("R-squ", "p-val")
+}
+
+hist(real_results$`R-squ`)
+hist(real_results$`p-val`)
+
+# correlation instead
+
+test_corr <- cor(test_glue$CALMACG00000000002.x, test_glue$CALMACG00000000002.y)
+
+test_results <- data.frame()
+
+for (i in seq(from=1, to=6, by=2)) {
+  x_2022 <- (test_glue[,i])
+  x_2022 <- unlist(x_2022)
+  y_2024 <- (test_glue[,i+1])
+  y_2024 <- unlist(y_2024)
+  loop_fit <- cor(x_2022, y_2024)
+  test_results <- rbind(test_results, loop_fit)
+  colnames(test_results) <- c("Correlation")
+}
+
+
+# real correlation
+
+real_results <- data.frame()
+
+test_log <- glue[,5:25568]
+test_log <- log(test_log)
+
+log_results <- data.frame()
+
+for (i in seq(from = 1, to = 25564, by = 2)) {
+  x_2022 <- (test_log[,i])
+  x_2022 <- unlist(x_2022)
+  y_2024 <- (test_log[,i+1])
+  y_2024 <- unlist(y_2024)
+  loop_fit <- cor.test(x_2022, y_2024)
+  print(loop_fit)
+  #log_results <- rbind(log_results, loop_fit)
+  #colnames(log_results) <- c("Correlation")
+}
+
+
+# bonus/extra code snippets which might be helpful:
+# isolating groups
+# example: cold Brazil
+
+comp_2022 <- which(cpms_2022$Origin == "Brazil" & cpms_2022$Regime == "Cold")
+comp_2022 <- cpms_2022[comp_2022,]
+comp_2022 <- subset(comp_2022, select = -c(X, Origin, Regime, Assay))
+comp_2022 <- t(comp_2022)
+avg_2022 <- as.data.frame(rowMeans(comp_2022))
+
+comp_2024 <- which(cpms_2024$Origin == "Brazil" & cpms_2024$Regime == "Cold")
+comp_2024 <- cpms_2024[comp_2024,]
+comp_2024 <- subset(comp_2024, select = -c(X, Origin, Regime, Assay))
+comp_2024 <- t(comp_2024)
+avg_2024 <- as.data.frame(rowMeans(comp_2024))
+
+# scatter
+
+i_hate_ggplot <- avg_2022
+i_hate_ggplot <- as.data.frame(append(i_hate_ggplot, avg_2024))
+colnames(i_hate_ggplot) <- c("y2022", "y2024")
+
+library(ggplot2)
+
+ggplotRegression <- function(fit){
+  
+  require(ggplot2)
+  
+  ggplot(fit$model, aes_string(x = names(fit$model)[2], y = names(fit$model)[1])) + 
+    geom_point() +
+    stat_smooth(method = "lm", col = "red") +
+    labs(title = paste("Adj R2 = ",signif(summary(fit)$adj.r.squared, 5),
+                       "Intercept =",signif(fit$coef[[1]],5 ),
+                       " Slope =",signif(fit$coef[[2]], 5),
+                       " P =",signif(summary(fit)$coef[2,4], 5)))
+}
+
+ggplotRegression(lm(CALMACG00000000002.x ~ CALMACG00000000002.y, data = test_glue))
+
+
+
+
+
