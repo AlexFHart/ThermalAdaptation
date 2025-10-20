@@ -1,5 +1,6 @@
 ### During preliminary analysis we identified a major batch effect between years that was not sufficiently dealt with by batch effect moderators such as limma's RemoveBatchEffect.
 ### Thus, the following code was used to whitelist genes which were at least somewhat consistent between years for further analysis.
+### Based on regression and correlation, you can pick a threshold that's appropriate for your dataset. We ended up with ~7.5k genes on our whitelist.
 
 # setup
 # import a file containing the normalised cpms of each year
