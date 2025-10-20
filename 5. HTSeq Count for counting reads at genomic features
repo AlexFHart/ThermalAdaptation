@@ -1,0 +1,36 @@
+### HTSeq Count can be used to determine the number of reads aligned to a genomic feature (gene, exon, 5' UTR etc) for each library.
+
+### Batch initiation looper
+
+#!/bin/bash
+#SBATCH -J HTSeq_loop2
+#SBATCH -A snic2022-5-546
+
+for sample in 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48
+do
+    sbatch HTSeq_loop.sh "$sample"
+done
+
+
+### HTSeq Count for counting features on BAMs 
+
+#!/bin/bash 
+#SBATCH -J HTSeqcount_batch
+#SBATCH -A snic2022-5-546
+#SBATCH -p core 
+#SBATCH -n 1
+#SBATCH -t 06:00:00 
+
+module load bioinfo-tools
+module load htseq/2.0.2
+
+L = $1
+
+htseq-count \
+--format=bam \
+-r pos \
+--stranded=reverse \
+-c $1_reverse \
+/proj/sexsel_data/snic2020-16-129_whole_project_directory/private/Stockholm_RNA_delivery06265/VD-3257/alex/sorting/filtered/$1_filtR.BAM \
+/proj/sexsel_data/snic2020-16-129_whole_project_directory/private/Stockholm_RNA_delivery06265/VD-3257/alex/newgenome/new_anno.gtf \
+> $1_counts.txt
