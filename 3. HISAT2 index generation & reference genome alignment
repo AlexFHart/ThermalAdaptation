@@ -1,0 +1,75 @@
+### this set of scripts is for using the HISAT2 read aligner and the necessary pre-processing steps
+
+### pre-processing: converting the .gff3 annotation to .gtf
+#!/bin/bash
+#SBATCH -J index_prep
+#SBATCH -A snic2022-5-546
+#SBATCH -p core 
+#SBATCH -t 01:00:00
+
+module load bioinfo-tools
+module load gffread/0.12.6
+
+gffread assembly-scaffolded.rc3_maker_final.liftover.gff3 -T -o new_anno.gtf
+
+
+### pre-processing: extract splice sites and exon sites using scripts from the HISAT2 github ("hisat2_extract_splice_sites.py" and "hisat2_extract_exons.py")
+
+module load bioinfo-tools
+module load HISAT2/2.2.1
+module load python
+
+python hisat2_extract_splice_sites.py new_anno.gtf > genome.ss
+python hisat2_extract_exons.py new_anno.gtf > genome.exon
+
+
+### pre-processing: the reference genome must be indexed before use with the main program
+
+#!/bin/bash
+#SBATCH -J hisat2_prep
+#SBATCH -A snic2022-5-546
+#SBATCH -p core 
+#SBATCH -n 16
+#SBATCH -t 03:00:00
+
+module load bioinfo-tools
+module load HISAT2/2.2.1
+
+hisat2-build -p 16 --exon genome.exon --ss genome.ss /proj/sexsel_data/snic2020-16-129_whole_project_directory/private/Stockholm_RNA_delivery06265/VD-3257/refgenome/GCA_900659725.1_ASM90065972v1_genomic.fna cmac_tran
+
+
+### now we can initiate the batch loop
+
+#!/bin/bash
+#SBATCH -J hisat2_init1
+#SBATCH -A snic2022-5-546
+
+for sample in 1 2 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 31 32
+do
+    sbatch hisat2loop.sh "$sample"
+done
+
+### finally, the main program is used to align reads to the reference genome. 
+
+#!/bin/bash -l
+#SBATCH -J hisat2_loopR
+#SBATCH -A snic2022-5-546
+#SBATCH -p core 
+#SBATCH -n 16
+#SBATCH -t 06:00:00 
+
+module load bioinfo-tools
+module load HISAT2/2.2.1
+
+L = $1
+
+hisat2 -x /crex/proj/sexsel_data/snic2020-16-129_whole_project_directory/private/Stockholm_RNA_delivery06265/VD-3257/alex/newgenome/new_cmac \
+-1 /home/aleha596/project/alex/Trimmo/$1_trimmed_1P.fq.gz \
+-2 /home/aleha596/project/alex/Trimmo/$1_trimmed_2P.fq.gz \
+-U /home/aleha596/project/alex/Trimmo/$1_trimmed_1U.fq.gz,/home/aleha596/project/alex/Trimmo/$1_trimmed_2U.fq.gz \
+-S $1_alignR \
+--summary-file $1_alignR_report.txt \
+--rna-strandness RF \
+--new-summary \
+--very-sensitive \
+--threads 16
