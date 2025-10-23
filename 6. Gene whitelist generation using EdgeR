@@ -19,7 +19,7 @@ group_means <- group_data %>% summarise(mean_value = mean(CALMACG00000000006))
 gulp <- group_data %>% summarise_if(is.numeric, mean, na.rm = TRUE)
 
 
-# setting up regression -> R^2 + p-val for every gene
+# setting up regression -> R^2 + corr + p-val for every gene
 # cpm (2022) x vs. cpm (2024) y
 
 gulp_2022 <- filter(gulp, Batch == "2022")
@@ -37,7 +37,7 @@ glue <- cbind(varlist, glue)
 
 test_fit <- lm(CALMACG00000000002.x ~ CALMACG00000000002.y, data = glue)
 summ <- summary(test_fit)
-rsqu <- summary(test_fit)$adj.r.squared
+corr <- summary(test_fit)$adj.r.squared
 pvall <- summary(test_fit)$coef[2,4]
 
 # test loop
@@ -51,11 +51,11 @@ for (i in seq(from=1, to=6, by=2)) {
   y_2024 <- as.data.frame(test_glue[,i+1])
   y_2024 <- unlist(y_2024)
   loop_fit <- lm(x_2022 ~ y_2024)
-  loop_rsqu <- summary(loop_fit)$adj.r.squared
+  loop_corr <- summary(loop_fit)$adj.r.squared
   loop_pvall <- summary(loop_fit)$coef[2,4]
-  output <- c(loop_rsqu, loop_pvall)
+  output <- c(loop_corr, loop_pvall)
   test_results <- rbind(test_results, output)
-  colnames(test_results) <- c("R-squ", "p-val")
+  colnames(test_results) <- c("corr", "p-val")
 }
 
 # now apply to real dataset
@@ -68,19 +68,19 @@ for (i in seq(from = 5, to = 25568, by = 2)) {
   y_2024 <- as.data.frame(glue[,i+1])
   y_2024 <- unlist(y_2024)
   loop_fit <- lm(x_2022 ~ y_2024)
-  loop_rsqu <- summary(loop_fit)$adj.r.squared
+  loop_corr <- summary(loop_fit)$adj.r.squared
   loop_pvall <- summary(loop_fit)$coef[2,4]
-  output <- c(loop_rsqu, loop_pvall)
+  output <- c(loop_corr, loop_pvall)
   real_results <- rbind(real_results, output)
-  colnames(real_results) <- c("R-squ", "p-val")
+  colnames(real_results) <- c("corr", "p-val")
 }
 
-hist(real_results$`R-squ`)
+hist(real_results$`corr`)
 hist(real_results$`p-val`)
 
-# correlation instead
+# R2 instead
 
-test_corr <- cor(test_glue$CALMACG00000000002.x, test_glue$CALMACG00000000002.y)
+test_R2 <- cor(test_glue$CALMACG00000000002.x, test_glue$CALMACG00000000002.y)
 
 test_results <- data.frame()
 
@@ -91,7 +91,7 @@ for (i in seq(from=1, to=6, by=2)) {
   y_2024 <- unlist(y_2024)
   loop_fit <- cor(x_2022, y_2024)
   test_results <- rbind(test_results, loop_fit)
-  colnames(test_results) <- c("Correlation")
+  colnames(test_results) <- c("R2")
 }
 
 
@@ -112,7 +112,7 @@ for (i in seq(from = 1, to = 25564, by = 2)) {
   loop_fit <- cor.test(x_2022, y_2024)
   print(loop_fit)
   #log_results <- rbind(log_results, loop_fit)
-  #colnames(log_results) <- c("Correlation")
+  #colnames(log_results) <- c("R2")
 }
 
 
