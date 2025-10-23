@@ -1,0 +1,536 @@
+# this script is a general template for WGCNA analysis and follow-up visualisation
+
+# setup
+library(WGCNA)
+library(ggplot2)
+library(tidyverse)
+library(gridExtra)
+library(igraph)
+library(dplyr)
+
+setwd("~/Library/Mobile Documents/com~apple~CloudDocs/Documents/PostDoc Folder/Scripts & Code/ThermAdapt/2024/WGCNA")
+
+# cpms contains list of samples (rows) and columns (genes) of counts per million which has been 
+cpms <- read.csv("2025_WCGNA_CPMs.csv")
+cpms <- column_to_rownames(cpms, var = "X")
+cpms <- t(cpms)
+cpms <- as.data.frame(cpms)
+# batch_fixxer ----
+files <- read.csv("~/Library/Mobile Documents/com~apple~CloudDocs/Documents/PostDoc Folder/Scripts & Code/edgeR Data/temp_groups.csv", sep = "\t", header = TRUE)
+keep <- which(files$Regime != "Hot") # can edit out chunks of samples here
+files <- files[keep,]
+
+# model design (additive model) - this is for selecting samples and moderating cpms
+assays <- as.factor(files$Assay)
+regime <- as.factor(files$Regime)
+origin <- as.factor(files$Origin)
+batch <- as.factor(files$Batch)
+
+assays <- relevel(assays, "29")
+regime <- relevel(regime, "Ancestral")
+origin <- relevel(origin, "California")
+
+design <- model.matrix(~0 + assays + regime + origin + assays*regime + assays*origin + regime*origin)
+
+cpms <- limma::removeBatchEffect(t(cpms), batch = files$Batch, design = design)
+cpms <- t(cpms)
+
+ # MANDATORY
+
+
+# do you want to filter out certain samples? -----
+cpms <- as.data.frame(cpms)
+cpms <- cpms %>% 
+  # rownames_to_column("pop") %>% 
+  # filter(stringr::str_detect(pop, 'A\\.'))
+  # filter(stringr::str_detect(pop, ".29|.35"))
+cpms <- column_to_rownames(cpms, var = "pop")
+
+# example sample set
+set_1x <- c("A.Bra.1.23", "A.Bra.2.29", "A.Cal.1.23", "A.Cal.2.29", "A.Yem.1.23", "A.Yem.2.29",
+           "A.Bra.1.23.n", "A.Bra.2.29.n", "A.Cal.1.23.n", "A.Cal.2.29.n", "A.Yem.1.23.n", "A.Yem.1.29.2.n")
+
+# Data QC
+quality_st <- goodSamplesGenes(t(cpms))
+summary(quality_st) # says everything's ok!
+ # NOT MANDATORY
+# outliers detection with htree + PCA  ---------------------
+htree <- hclust(dist(cpms), method = "average")
+plot(htree)
+
+pca <- prcomp(cpms)
+pca.dat <- pca$x
+
+pca.var <- pca$sdev^2
+pca.var.percent <- round(pca.var/sum(pca.var)*100, digits = 2)
+
+pca.dat <- as.data.frame(pca.dat)
+
+ggplot(pca.dat, aes(PC1, PC2)) +
+  geom_point() +
+  geom_text(label = rownames(pca.dat)) +
+  labs(x = paste0('PC1: ', pca.var.percent[1], ' %'),
+       y = paste0('PC2: ', pca.var.percent[2], ' %'))
+
+ # MANDATORY IF NOT PRE-ESTABLISHED
+# removal of dodgy samples and gene whitelisting ---------------
+
+# all samples
+samples.to.be.excluded <- c('H.Bra.2.29', 'A.Bra.1.23', 'A.Cal.1.29', 'A.Bra.1.35', 'H.Bra.2.35.n')
+
+data.subset <- cpms[!(rownames(cpms) %in% samples.to.be.excluded),]
+
+combo <- read.csv("~/Library/Mobile Documents/com~apple~CloudDocs/Documents/PostDoc Folder/Scripts & Code/ThermAdapt/2024/the_plan_II/phase one/combo_blacklist.csv", header = FALSE)
+combo <- combo$V1 # this is necessary because it only works with character vector 
+keep <- colnames(data.subset) %in% combo
+data.subset <- data.subset[,keep] #whoops
+  # MANDATORY
+# power picking ------------------------
+# result will depend on sample subset
+allowWGCNAThreads() 
+powers = c(c(1:10), seq(from = 12, to = 50, by = 2)) #trying a range
+
+sft = pickSoftThreshold(
+  data.subset,             # <= Input data
+  #blockSize = 30,
+  powerVector = powers,
+  networkType = "signed",
+  verbose = 5
+)
+ # MANDATORY IF NOT PRE-ESTABLISHED
+# visualisation method 1 -----------------
+sft.data <- sft$fitIndices
+
+a1 <- ggplot(sft.data, aes(Power, SFT.R.sq, label = Power)) +
+  geom_point() +
+  geom_text(nudge_y = 0.1) +
+  geom_hline(yintercept = 0.8, color = 'red') +
+  labs(x = 'Power', y = 'Scale free topology model fit, signed R^2') +
+  theme_classic()
+
+
+a2 <- ggplot(sft.data, aes(Power, mean.k., label = Power)) +
+  geom_point() +
+  geom_text(nudge_y = 0.1) +
+  labs(x = 'Power', y = 'Mean Connectivity') +
+  theme_classic()
+
+grid.arrange(a1, a2, nrow = 2)
+ # MANDATORY IF NOT PRE-ESTABLISHED
+# visualisation method 2 -------------------
+par(mfrow = c(1,2));
+cex1 = 0.9;
+
+plot(sft$fitIndices[, 1],
+     -sign(sft$fitIndices[, 3]) * sft$fitIndices[, 2],
+     xlab = "Soft Threshold (power)",
+     ylab = "Scale Free Topology Model Fit, signed R^2",
+     main = paste("Scale independence")
+)
+text(sft$fitIndices[, 1],
+     -sign(sft$fitIndices[, 3]) * sft$fitIndices[, 2],
+     labels = powers, cex = cex1, col = "red"
+)
+abline(h = 0.90, col = "red")
+plot(sft$fitIndices[, 1],
+     sft$fitIndices[, 5],
+     xlab = "Soft Threshold (power)",
+     ylab = "Mean Connectivity",
+     type = "n",
+     main = paste("Mean connectivity")
+)
+text(sft$fitIndices[, 1],
+     sft$fitIndices[, 5],
+     labels = powers,
+     cex = cex1, col = "red")
+ # MANDATORY IF NOT PRE-ESTABLISHED
+# running the network construction -------------------
+picked_power = 20
+temp_cor <- cor       
+cor <- WGCNA::cor         # Force it to use WGCNA cor function (fix a namespace conflict issue)
+
+netwk <- blockwiseModules(data.subset,                # <= input here
+                          # == Adjacency Function ==
+                          power = picked_power,                # <= power here
+                          networkType = "signed",
+                          # == Tree and Block Options ==
+                          deepSplit = 1,
+                          pamRespectsDendro = F,
+                          # detectCutHeight = 0.75,
+                          minModuleSize = 30,
+                          maxBlockSize = 8000, #based on RAM capability
+                          # == Module Adjustments ==
+                          reassignThreshold = 1.00E-06,
+                          mergeCutHeight = 0.35,
+                          # == TOM == Archive the run results in TOM file (saves time)
+                          saveTOMs = T,
+                          saveTOMFileBase = "ER",
+                          # == Output Options
+                          numericLabels = F,
+                          verbose = 3)
+
+# summarise -----
+coloratura <- as.data.frame(netwk$colors)
+coloratura %>% count(netwk$colors)
+
+
+setwd("~/Library/Mobile Documents/com~apple~CloudDocs/Documents/PostDoc Folder/Scripts & Code/ThermAdapt/2025/WCGNA/new results/setcut")
+write.csv(coloratura, "MixedAnc2935_set4_network.csv") # output results to file
+
+# alternative; before and after merging
+plotDendroAndColors(netwk$dendrograms[[1]], cbind(netwk$unmergedColors, netwk$colors),
+                    c("unmerged", "merged"),
+                    dendroLabels = FALSE,
+                    addGuide = TRUE,
+                    hang= 0.03,
+                    guideHang = 0.05)
+
+# post-network construction analysis
+
+# hub gene extraction
+KMes <- signedKME(data.subset, netwk$MEs, outputColumnName = "KME", corFnc = "bicor")
+
+hub_gene_wrapper <- function(kmess) {
+  kmess <- KMes
+
+  rn <- row.names(kmess)
+  f <- function(x) tail(rn[order(x)], n = 10)
+  nowtput <- sapply(kmess, f)
+  
+  return(nowtput)
+  }
+
+houtput <- hub_gene_wrapper(KMes)
+rev_data_frame <- apply(houtput, 2, rev)
+houtput2 <- as.data.frame(rev_data_frame)
+write.csv(houtput2, "cold29_top_ten_hubgenes.csv")
+
+
+# # how do we associate our traits with specific modules?
+bin_traits <- read.csv("~/Library/Mobile Documents/com~apple~CloudDocs/Documents/PostDoc Folder/Scripts & Code/ThermAdapt/2025/WCGNA/new results/bin_traits.csv", header = T)
+bin_traits <- column_to_rownames(bin_traits, var = "ID")
+bin_traits <- bin_traits[!(rownames(bin_traits) %in% samples.to.be.excluded),]
+
+nSamples <- nrow(data.subset)
+nGenes <- ncol(data.subset)
+module_eigengenes <- netwk$MEs
+module_eigengenes <- module_eigengenes[!(row.names(module_eigengenes) %in% samples.to.be.excluded), ]
+binny <- rownames(bin_traits) # idk why but one of the yemen samples drop out, H.Yem.2.35
+module_eigengenes <- module_eigengenes[(row.names(module_eigengenes) %in% binny),]
+
+moddy <- rownames(module_eigengenes) # this code makes the heatmap work for subsets (no it doesn't)
+bin_traits <- bin_traits[(row.names(bin_traits) %in% moddy),]
+
+module.trait.corr <- cor(module_eigengenes, bin_traits, use = 'p')
+module.trait.corr.pvals <- corPvalueStudent(module.trait.corr, nSamples)
+
+heatmap.data <- merge(module_eigengenes, bin_traits, by = 'row.names')
+
+head(heatmap.data)
+
+heatmap.data <- heatmap.data %>% 
+  column_to_rownames(var = 'Row.names')
+
+cols_remove <- c("Old", "New", "Brazil", "Cali", "Yemen") # adjust for any missing variable
+heatmap.data <- heatmap.data[, !(colnames(heatmap.data) %in% cols_remove)]
+
+library(CorLevelPlot)
+
+# dimensions need adjusting for each network
+CorLevelPlot(heatmap.data,
+             x = names(heatmap.data)[5:15], # traits
+             y = names(heatmap.data)[1:4],  # modules
+             col = c("blue1", "skyblue", "white", "pink", "red"))
+
+### building an alternative for datasets too big to draw
+library(Hmisc)
+hmp2 <- rcorr(as.matrix(heatmap.data))
+
+flattenCorrMatrix <- function(cormat, pmat) {
+  ut <- upper.tri(cormat)
+  data.frame(
+    row = rownames(cormat)[row(cormat)[ut]],
+    column = rownames(cormat)[col(cormat)[ut]],
+    cor  =(cormat)[ut],
+    p = pmat[ut]
+  )
+}
+
+flatmap <- flattenCorrMatrix(hmp2$r, hmp2$P)
+# need to subset for just trait-module correlations not mod-mod !!!!!!!!
+flatmap <- flatmap[2081:2850,] # need to subset for just trait-module correlations not mod-mod !!!!!
+# need to subset for just trait-module correlations not mod-mod !!!!
+flatmap_sig <- subset(flatmap, p <= 0.05)
+write.csv(flatmap_sig, "hot35_correlations.csv")
+
+# heatmap for nice things
+CorLevelPlot(flatmap_sig,
+             x = names(flatmap_sig$row)[,3], # traits
+             y = names(flatmap_sig$column),  # modules
+             col = c("blue1", "skyblue", "white", "pink", "red"))
+
+
+# correlate trait and genetic profile ------
+gene.signf.corr <- cor(data.subset, bin_traits$Yemen, use = 'p')
+gene.signf.corr.pvals <- corPvalueStudent(gene.signf.corr, 105)
+
+trait_corr <- cbind(gene.signf.corr, gene.signf.corr.pvals)
+colnames(trait_corr) <- c("corr", "pval")
+write.csv(trait_corr, "all_29_assoc.csv")
+
+gene.signf.corr.pvals %>% 
+  as.data.frame() %>% 
+  arrange(V1) %>% 
+  head(25)
+
+
+
+
+# tutorial
+
+MEs0 <- moduleEigengenes(data.subset, mergedColors)$eigengenes
+
+# Reorder modules so similar modules are next to each other
+MEs0 <- orderMEs(MEs0)
+module_order = names(MEs0) %>% gsub("ME","", .)
+
+# Add treatment names
+MEs0$treatment = row.names(MEs0)
+
+mME = MEs0 %>%
+  pivot_longer(-treatment) %>%
+  mutate(
+    name = gsub("ME", "", name),
+    name = factor(name, levels = module_order)
+  )
+
+mME %>% ggplot(., aes(x=treatment, y=name, fill=value)) +
+  geom_tile() +
+  theme_bw() +
+  scale_fill_gradient2(
+    low = "blue",
+    high = "red",
+    mid = "white",
+    midpoint = 0,
+    limit = c(-1,1)) +
+  theme(axis.text.x = element_text(angle=90)) +
+  labs(title = "Module-trait Relationships", y = "Modules", fill="corr")
+
+
+
+# pick out a few modules of interest here
+modules_of_interest = c("blue", "brown", "turquoise")
+
+# Pull out list of genes in that module
+submod = module_df %>%
+  subset(colors %in% modules_of_interest)
+
+row.names(module_df) = module_df$gene_id
+
+# Get normalized expression for those genes
+expr_normalized = t(cpms)
+subexpr = expr_normalized[submod$gene_id,]
+
+submod_df = data.frame(subexpr) %>%
+  mutate(
+    gene_id = row.names(.)
+  ) %>%
+  pivot_longer(-gene_id) %>%
+  mutate(
+    module = module_df[gene_id,]$colors
+  )
+
+submod_df %>% ggplot(., aes(x=name, y=value, group=gene_id)) +
+  geom_line(aes(color = module),
+            alpha = 0.2) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90)
+  ) +
+  facet_grid(rows = vars(module)) +
+  labs(x = "treatment",
+       y = "normalized expression")
+
+
+
+genes_of_interest = module_df %>%
+  subset(colors %in% modules_of_interest)
+
+expr_of_interest = expr_normalized[genes_of_interest$gene_id,]
+
+
+# Only recalculate TOM for modules of interest (faster, altho there's some online discussion if this will be slightly off)
+TOM = TOMsimilarityFromExpr(t(expr_of_interest),
+                            power = picked_power)
+
+# Add gene names to row and columns
+row.names(TOM) = row.names(expr_of_interest)
+colnames(TOM) = row.names(expr_of_interest)
+
+edge_list = data.frame(TOM) %>%
+  mutate(
+    gene1 = row.names(.)
+  ) %>%
+  pivot_longer(-gene1) %>%
+  dplyr::rename(gene2 = name, correlation = value) %>%
+  unique() %>%
+  subset(!(gene1==gene2)) %>%
+  mutate(
+    module1 = module_df[gene1,]$colors,
+    module2 = module_df[gene2,]$colors
+  )
+
+head(edge_list)
+
+# Export Network file to be read into Cytoscape, VisANT, etc
+write.table(edge_list,
+            file = "edgelist7.tsv")
+
+
+
+### CIRCLIZE FOR CHORD DIAGRAMS
+
+# setup
+setwd("~/Library/Mobile Documents/com~apple~CloudDocs/Documents/PostDoc Folder/Scripts & Code/ThermAdapt/2025/WCGNA/new results/setcut")
+
+library(dplyr)
+library(circlize)
+library(tidyr)
+library(tibble)
+
+# data read-in
+
+A <- read.csv("anc23_network.csv")
+B <- read.csv("cold23_network.csv")
+colnames(A) <- c("X", "x")
+colnames(B) <- c("X", "x")
+
+# data prep
+
+A_data <- A
+B_data <- B
+
+A_data$numbering <- ave(A_data$X, A_data$x,FUN = seq_along) 
+B_data$numbering <- ave(B_data$X, B_data$x,FUN = seq_along) 
+
+adj_list <- inner_join(A_data, B_data, by = c("X" = "X"))
+adj_list <- adj_list[,-1]
+adj_list <- adj_list[,c(2,1,3,4)]
+
+summ <- adj_list %>% count(x.x, x.y)
+
+# testsumm <- summ %>%
+#   arrange(desc(n)) %>%  # arrange in descending order
+#   slice(1:10)                 
+#summ <- as.matrix.data.frame(summ)
+# coloURS WILL NOT WORK WITH DATA FRAME SO CONVERT TO MATRIX/LIST PLEASE
+
+testinge <- reshape(summ, idvar = "x.x", timevar = "x.y", direction = "wide")
+testinge <- remove_rownames(testinge)
+testinge <- column_to_rownames(testinge, var = "x.x")
+
+colnames(testinge) <- unique(summ$x.y)
+
+testrow <- rownames(testinge)
+testcol <- colnames(testinge)
+
+testrow2 <- paste(testrow, "A", sep = "_")
+testcol2 <- paste(testcol, "B", sep = "_")
+
+rownames(testinge) <- testrow2
+colnames(testinge) <- testcol2
+testinge <- as.matrix(testinge)
+
+# testinge <- testinge[1:10,1:10]
+
+labs <- c(rownames(testinge), colnames(testinge))
+
+# can we write a function which will automatically generate grid.col for us?
+
+gridcol_wrapper <- function() {
+  names <-  c(testrow2, testcol2)
+  colours <- c(testrow, testcol)
+  output <- ""
+  
+  for (mod in 1:length(names)) {
+    output <- append(output, paste0(names[mod], " = ", paste0("\'"), colours[mod], paste0("\'"), ", "))
+
+  }
+  print(as.data.frame(output), row.names = F)
+}
+
+
+# it's not pretty but what you need to do is copy and paste the output of the gridcol_wrapper function into 
+gridcol_wrapper()
+
+# e.g. 
+griddo <- c( black_A = 'black', 
+                 blue_A = 'blue', 
+               brown_A = 'brown', 
+               green_A = 'green', 
+                 grey_A = 'grey', 
+                 pink_A = 'pink', 
+                   red_A = 'red', 
+       turquoise_A = 'turquoise', 
+             yellow_A = 'yellow', 
+               black_B = 'black', 
+                 blue_B = 'blue', 
+               brown_B = 'brown', 
+                 cyan_B = 'cyan', 
+               green_B = 'green', 
+   greenyellow_B = 'greenyellow', 
+                 grey_B = 'grey', 
+       lightcyan_B = 'lightcyan', 
+           magenta_B = 'magenta', 
+ midnightblue_B = 'midnightblue', 
+                 pink_B = 'pink', 
+             purple_B = 'purple', 
+                   red_B = 'red', 
+             salmon_B = 'salmon', 
+                   tan_B = 'tan', 
+       turquoise_B = 'turquoise', 
+             yellow_B = 'yellow')
+
+# listed <- adjacencyMatrix2List(testinge)
+# A_labs <- unique(listed$from)
+# B_labs <- unique(listed$to)
+# labs <- c(A_labs, B_labs)
+
+pdf("A_Anc23_B_cold23.pdf")
+
+
+circos.clear()
+circos.par(cell.padding = c(0.02, 0, 0.02, 0))
+circos.initialize(sectors = labs, xlim = c(0, 1))
+circos.track(ylim = c(0, 1))
+
+grid.col = griddo
+
+chordDiagram(testinge, grid.col = grid.col,
+             annotationTrack = c("grid", "axis"), 
+             preAllocateTracks = list(track.height = max(strwidth(unlist(dimnames(testinge))))))
+
+circos.track(track.index = 1, panel.fun = function(x, y) {
+  xlim = get.cell.meta.data("xlim")
+  xplot = get.cell.meta.data("xplot")
+  ylim = get.cell.meta.data("ylim")
+  sector.name = get.cell.meta.data("sector.index")
+ 
+  if(abs(xplot[2] - xplot[1]) < 20) {
+    circos.text(mean(xlim), ylim[1], sector.name, facing = "clockwise",
+                niceFacing = TRUE, adj = c(-0.4, 0.5), col = "black")
+  } else {
+    circos.text(mean(xlim), ylim[1], sector.name, facing = "inside", 
+                niceFacing = TRUE, adj = c(0.5, -1.35), col= "black")
+  }
+}, bg.border = NA)
+
+# circos.track(track.index = 1, panel.fun = function(x, y) {
+#   circos.text(CELL_META$xcenter, CELL_META$ylim[1], CELL_META$sector.index, 
+#               facing = "clockwise", niceFacing = TRUE, adj = c(-0.30, 0.5), )
+#  }, bg.border = NA) 
+
+
+dev.off()
+
+
