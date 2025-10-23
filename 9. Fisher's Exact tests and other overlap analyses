@@ -1,0 +1,103 @@
+# template for Fisher's Exact Tests
+# testing for a significant. association between a set of samples and a condition
+# compared to a different condition, i.e. heat and not heat -> transcriptomic change?
+
+# set-up
+library(GeneOverlap)
+library(dplyr)
+
+setwd("~/Library/Mobile Documents/com~apple~CloudDocs/Documents/PostDoc Folder/Scripts & Code/ThermAdapt/2025/Fisher Exact Tests")
+
+# universe contains a complete list of all genes in the genome (whitelist)
+universe <- read.csv("~/Library/Mobile Documents/com~apple~CloudDocs/Documents/PostDoc Folder/Scripts & Code/ThermAdapt/2024/the_plan_II/phase one/combo_blacklist.csv", header = FALSE)
+universe <- length(unique(rownames(universe)))
+
+# this file contains columns of genes found sigificant under different conditions, e.g. column 'bra.hot.plast' -> 'CALMACG00000000002', 'CALMACG00000000031'
+gennes <- read.csv("all_sig_genes.csv")
+
+# files containing outputs from edgeR which can be filtered in various ways
+yem <- read.csv("~/Library/Mobile Documents/com~apple~CloudDocs/Documents/PostDoc Folder/Scripts & Code/ThermAdapt/2024/BAAEA/plastic and evolved responses/yemen_plastic_hot_response.csv")
+bra <- read.csv("~/Library/Mobile Documents/com~apple~CloudDocs/Documents/PostDoc Folder/Scripts & Code/ThermAdapt/2024/BAAEA/plastic and evolved responses/brazil_plastic_hot_response.csv")
+cal <- read.csv("~/Library/Mobile Documents/com~apple~CloudDocs/Documents/PostDoc Folder/Scripts & Code/ThermAdapt/2024/BAAEA/plastic and evolved responses/cali_plastic_hot_response.csv")
+
+# filtering edgeR outputs
+setA <- subset(bra$X, bra$PValue < 0.05)
+setB <- subset(cal$X, cal$PValue < 0.05)
+setC <- subset(yem$X, yem$PValue < 0.05)
+
+# x <- read.delim(pipe("pbpaste"), header = FALSE)
+# yem_cold <- x
+setA_ass <- bra_hot %>% filter((V6 == "B (++)" | V6 == "C (--)"))
+setA_ass <- setA_ass$V1
+
+# calculating overlaps between given sets
+overl <- newGeneOverlap(
+  unique(cal),
+  unique(yem),
+  genome.size=universe)
+
+overl <- testGeneOverlap(overl)
+print(overl)
+
+# how do we interpret this.
+
+
+# correcting, Wood et al. use BH
+
+listje <- c(
+
+ )
+
+
+fixed <- p.adjust(listje, method = "BH", n = length(listje))
+
+
+
+# raw count input
+# this is cute but there's a package which supposedly makes it easier
+DIY_fisher <- function(both, set1, set2, neither) {
+  A <- both
+  B <- set1
+  C <- set2
+  D <- neither
+  N <- (A+B) + (C+D)
+  numerator <- factorial(A + B) * factorial(C + D) * factorial(A + C) * factorial(B + D)
+  denominator <- factorial(A) * factorial(B) * factorial(C) * factorial(D) * factorial(N)
+  result <- numerator / denominator
+  return(result)
+}
+
+DIY_fisher(532, 2119, 2884, 20000)
+
+
+# ==============
+
+# single-tailed Fisher's exact testing for manuscript
+
+setwd("~/Library/Mobile Documents/com~apple~CloudDocs/Documents/PostDoc Folder/Scripts & Code/ThermAdapt/2025")
+
+col_sig <- read.delim(pipe("pbpaste"), header = FALSE)
+col_NS <- read.delim(pipe("pbpaste"), header = FALSE)
+row_sig <- read.delim(pipe("pbpaste"), header = FALSE)
+row_NS <- read.delim(pipe("pbpaste"), header = FALSE)
+
+
+tot_all <- rbind(col_sig, col_NS, row_sig, row_NS)
+tot_unique <- unique(tot_all)
+
+quad_A <- intersect(col_sig, col_NS)
+
+
+set_intersection <- intersect(set1, set2)
+num_shared <- length(set_intersection)
+overlap <- num_shared / min(length(set1), length(set2))
+jaccard <- num_shared / length(union(set1, set2))
+name1 <- pos1
+name2 <- pos2
+ovja <- c(name, nema, overlap, jaccard, name1, name2)
+output <- rbind(output, ovja)
+
+
+
+table <- data.frame(c(col_sig, col_NS), c(row_sig, row_NS))
+
