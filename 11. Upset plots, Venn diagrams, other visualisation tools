@@ -1,0 +1,122 @@
+# this file contains the code for several data visualisation approaches used in our analysis.
+
+# ================== Upset Plots ================== #
+# setup
+library(UpSetR)
+library(ComplexHeatmap)
+setwd("~/Library/Mobile Documents/com~apple~CloudDocs/Documents/PostDoc Folder/Scripts & Code/ThermAdapt/2025/upsets")
+# labs is a file containing a list of genes and presence/absence info for different lists of interest. 
+# for example, a column called 'PlastCold' has TRUE/FALSE options for each gene depending on the gene's significance for that test.
+labs <- read.csv("~/Library/Mobile Documents/com~apple~CloudDocs/Documents/PostDoc Folder/Scripts & Code/ThermAdapt/2025/Whitelist Plus/results/labels.csv")
+
+# gene retrieval 3x for each genetic background
+# this code extracts specific information about a category and variable combination of interest, which you can change
+# repeat per category: antag, common, hotpriv, coldpriv
+bra <- data.frame(labs$IDs, labs$braNothing)
+colnames(bra) <- c("ID", "bravar")
+bra <- subset(bra, bravar == "TRUE")
+bra <- bra$ID
+
+cal <- data.frame(labs$IDs, labs$calNothing)
+colnames(cal) <- c("ID", "calvar")
+cal <- subset(cal, calvar == "TRUE")
+cal <- cal$ID
+
+yem <- data.frame(labs$IDs, labs$yemNothing)
+colnames(yem) <- c("ID", "yemvar")
+yem <- subset(yem, yemvar == "TRUE")
+yem <- yem$ID
+
+# make a list of lists
+antag_upset <- fromList(list(Cali = cal, Brazil = bra, Yemen = yem))
+antag_comb <- make_comb_mat(antag_upset)
+
+# visualise the list of lists!
+UpSet(antag_comb, top_annotation = upset_top_annotation(antag_comb, add_numbers = TRUE, show_annotation_name = FALSE),
+      right_annotation = upset_right_annotation(antag_comb, add_numbers = TRUE), 
+      set_order=c('Brazil','Cali','Yemen'),column_title='Nothing Loci')
+  
+# ================== Histogram & Volcano Plot ================== #
+#setup
+library(ggplot2)
+library(dplyr)
+library(VennDiagram)
+
+# data read-in
+setwd("/Users/alex/Library/Mobile Documents/com~apple~CloudDocs/Documents/PostDoc Folder/Scripts & Code/ThermAdapt/2024/BAAEA/plastic and evolved responses")
+all_cplast <-read.csv("allpops_plastic_cold_response.csv") # files containing the unprocessed edgeR outputs; gene IDs + logFCs + pvals
+all_hplast <-read.csv("allpops_plastic_hot_response.csv")
+
+# processing
+setwd("~/Library/Mobile Documents/com~apple~CloudDocs/Documents/PostDoc Folder/Scripts & Code/ThermAdapt/2025/qwikviz")
+responsec <- all_cplast
+responseh <- all_hplast
+
+# Add a column to the data frame to specify if they are UP- or DOWN- regulated 
+# (log2fc respectively positive or negative)
+responseh$DEG <- "NO"
+responseh$DEG[responseh$logFC > 0 & responseh$PValue < 0.05] <- "UP"
+responseh$DEG[responseh$logFC < 0 & responseh$PValue < 0.05] <- "DOWN"
+
+responsec$DEG <- "NO"
+responsec$DEG[responsec$logFC > 0 & responsec$PValue < 0.05] <- "UP"
+responsec$DEG[responsec$logFC < 0 & responsec$PValue < 0.05] <- "DOWN"
+
+response <- responseh # specifies that we are interested in drawing the hot response right now
+ns <- response %>% filter(DEG == "NO")
+up <- response %>% filter(DEG == "UP")
+down <- response %>% filter(DEG == "DOWN")
+
+# what can we visualise?
+# histograms of LogFCs, sig/not
+hist(ns$logFC, breaks = 10, col=rgb(0.3,0.3,0.3,1/4)) # this adds the base of the plot and the distribution of the non-significant log fold changes
+hist(up$logFC, breaks = 10,  col=rgb(0.9,0.7,0.2,0.5), add=T) # this adds a visual in yellow for the genes which are up-regulated in response to the variable
+hist(down$logFC, breaks = 10, col=rgb(0.6,0.2,0.7,0.5), add=T)  # this adds a visual in purple for the genes which are down-regulated in response to the variable
+
+# volcano plots
+# cold response, using the same yellow=up, purple=down
+coldv <- ggplot(data=responsec, aes(x=logFC, y=-log10(PValue), col = DEG)) + 
+  geom_hline(yintercept = -log10(0.05), col = "gray", linetype = 'dashed') + 
+  scale_color_manual(values = c("purple", "grey", "gold"), # to set the colours of our variable<br /><br /><br />
+                     labels = c("Downregulated", "Not significant", "Upregulated")) +
+  geom_point()
+
+plot(coldv)
+
+# hot response
+hotv <- ggplot(data=responseh, aes(x=logFC, y=-log10(PValue), col = DEG)) + 
+  geom_hline(yintercept = -log10(0.05), col = "gray", linetype = 'dashed') + 
+  scale_color_manual(values = c("purple", "grey", "gold"), # to set the colours of our variable<br /><br /><br />
+                     labels = c("Downregulated", "Not significant", "Upregulated")) +
+  geom_point()
+
+plot(hotv)
+
+# ================== Venn Diagram ================== #
+# this code was written to accept lists of genes that are copied to the clipboard from a spreadsheet but could easily be adapted to take vectors/lists from other sources
+
+# copy each list of gene IDs - no header
+bra <- read.delim(pipe("pbpaste"), header = FALSE) # this code will accept a list from the clipboard and save it to a variable
+cal <- read.delim(pipe("pbpaste"), header = FALSE)
+yem <- read.delim(pipe("pbpaste"), header = FALSE)
+bra <- bra$V1 # they gotta be character vectors thanks
+cal <- cal$V1
+yem <- yem$V1
+
+# this will produce a venn diagram of the three lists specified above and output the plot to a .png file in the working directory
+venny_boy <- venn.diagram(
+  x = list(bra, cal, yem),
+  category.names = c("Brazil" , "California", "Yemen"),
+  fill = c("green3", "gold2", "red3"), 
+ # alpha = c(0.5, 0.5),
+ # lwd =0,
+  filename = 'venn_plastic_trees.png',
+  output=TRUE,
+  disable.logging = TRUE,
+  #cat.just=list(c(1.5,0) , c(0,0))
+)
+
+
+
+
+
