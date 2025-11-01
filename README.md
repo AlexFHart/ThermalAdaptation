@@ -12,3 +12,4 @@ This is the set of scripts which comprise a pipeline from raw sequence data to g
 8. Gene Ontology analysis
 9. Statistical analaysis approaches using Fisher's Exact tests etc.
 10. WGCNA & Circlize visualisation
+11. Upset plots, Venn diagrams, and other visualisation tools
