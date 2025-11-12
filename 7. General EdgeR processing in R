@@ -11,13 +11,19 @@ setwd("~/Library/Mobile Documents/com~apple~CloudDocs/Documents/PostDoc Folder/S
 # reading in files
 files <- read.csv("temp_groups.csv", sep = "\t", header = TRUE)
 
-# the following code can be modified to include/exclude different groups from analysis
-# keep <- which(files$Origin == "Yemen")
-# files <- files[keep,]
-# keep <- which(files$Regime != "Switch")
-# files <- files[keep,]
-# keep <- which(files$Assay == "35")
-# files <- files[keep,]
+#-----------------------------------------------------------------------#
+# step 1.5a - data subsetting - to process data efficiently and with an appropriate model, the total set of samples is first subset to only include
+# samples that are relevant for the analysis. For example:
+# For the "All pops" general analysis, no samples are excluded.
+# For the per-background analysis, you can filter just samples from that background:
+
+keep <- which(files$Origin == "Yemen")
+files <- files[keep,]
+
+# To look exclusively at plastic responses, you can exclude non-ancestral responses. 
+# Swap "Ancestral" with "Hot" or "Cold" for different genetic responses.
+keep <- which(files$Regime != "Ancestral") 
+files <- files[keep,]
 
 # create a counts object with EdgeR
 counts <- readDGE(files$Files, header=FALSE, labels = files$Summary, group = files$group)
@@ -37,9 +43,9 @@ counts<-counts[!noint,]
 # manual recalculation of library sizes
 counts$samples$lib.size <- colSums(counts$counts)
 
-#-----------------------------------------------------------------------#
-# step 1.5: design set-up
-# model design (additive model) but will need to be adjusted based on what comparison is being performed
+# then step 1.5b - choosing the appropriate model for the comparison you are doing/question you are asking
+# model design (additive model) adjusted based on what comparison is being performed
+# initialisation
 assays <- as.factor(files$Assay)
 regime <- as.factor(files$Regime)
 origin <- as.factor(files$Origin)
@@ -50,7 +56,16 @@ assays <- relevel(assays, "29")
 regime <- relevel(regime, "Ancestral")
 origin <- relevel(origin, "California")
 
-design <- model.matrix(~0 + assays + regime + origin + assays*regime + assays*origin + regime*origin)
+# full general model - all samples, "all pops"
+design <- model.matrix(~0 + assays + regime + origin + batch + assays*regime + assays*origin + regime*origin)
+
+# models for different subsets will look different. 
+# For example, to examine plastic responses in specific backgrounds, first subset the data (in step 1.5a), then the model would be:
+design <- model.matrix(~0 + assays + batch) 
+# because the samples are all from the same origin if subset, and you're only looking at one regime for plastic tests (ancestral).
+# Similarly, the model for examining genetic responses in specific backgrounds looks much simpler after subsetting:
+design <- model.matrix(~0 + regime + batch)
+# since the origin is similarly pre-subset, and the assay temperature is uniform in this question.
 
 #-----------------------------------------------------------------------#
 # step 2: filtering
