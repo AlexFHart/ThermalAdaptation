@@ -1,0 +1,247 @@
+# mass correlations argh
+# what's going to be the most efficient setup here? I think:
+# 1. Normalise the data across all samples
+# 2. Extract the LogFC comparisons for each "plastic" and "evolved" response (write an external list of pairs)
+# 3. Write something to aggregate the correlations afterwards.
+
+#-----------------------------------------------------------------------#
+# step 1: set up, import, and normalise all samples - just standard edgeR data import and pre-processing
+# setting up the work environment
+library(edgeR)
+library(stringr)
+library(dplyr)
+library(tibble)
+setwd("~/Library/Mobile Documents/com~apple~CloudDocs/Documents/PostDoc Folder/Scripts & Code/ThermAdapt/2025/correlations")
+files <- read.csv("replicate_groups.csv", sep = ",", header = TRUE)
+keep <- which(files$Regime != "Switch")
+files <- files[keep,]
+
+setwd("~/Library/Mobile Documents/com~apple~CloudDocs/Documents/PostDoc Folder/Scripts & Code/edgeR Data")
+counts <- readDGE(files$Files, header=FALSE, labels = files$Summary, group = files$group)
+
+# whitelisting - idk why it's labelled a blacklist, it's the opposite
+combo <- read.csv("~/Library/Mobile Documents/com~apple~CloudDocs/Documents/PostDoc Folder/Scripts & Code/ThermAdapt/2024/the_plan_II/phase one/combo_blacklist.csv", header = FALSE)
+
+combo <- combo$V1 # this is necessary because it only works with character vector 
+combo <- rownames(counts) %in% combo
+counts <- counts[combo,] #whoops
+
+# cleaning up meta tags
+noint<-rownames(counts) %in% c("__no_feature", "__ambiguous", "__too_low_aQual", "__not_aligned", "__alignment_not_unique")
+counts<-counts[!noint,]
+
+# manual recalculation of library sizes
+counts$samples$lib.size <- colSums(counts$counts)
+
+#-----------------------------------------------------------------------#
+# step 1.1: design catch-all, general model
+# model design (additive model)
+assays <- as.factor(files$Assay)
+regime <- as.factor(files$Regime)
+origin <- as.factor(files$Origin)
+batch <- as.factor(files$Batch)
+
+assays <- relevel(assays, "29")
+regime <- relevel(regime, "Ancestral")
+origin <- relevel(origin, "California")
+
+design <- model.matrix(~0 + assays + regime + origin + batch + assays*regime + assays*origin + regime*origin)
+
+#-----------------------------------------------------------------------#
+# step 1.2: filtering
+# filtering out very low read counts
+keep <- filterByExpr(counts, design) 
+counts <- counts[keep, , keep.lib.sizes=FALSE]
+
+# low CPM filtering + features in two samples or more filtering
+# default: cpm 10, countcheck 4
+countsPerMillion <- cpm(counts)
+countCheck <- countsPerMillion > 10
+keep <- which(rowSums(countCheck) >= 108) # there's 3746 genes at this stage for 10cpm in all samples
+counts <- counts[keep,]
+
+#-----------------------------------------------------------------------#
+# step 1.3: normalisation
+counts <- calcNormFactors(object = counts)
+counts <- normLibSizes(counts)
+
+#-----------------------------------------------------------------------#
+# step 1.4: dispersion estimation & model fitting
+# "traditional" GLM approach
+# first need some dispersions/BCVs
+counts <- estimateGLMCommonDisp(counts, design)
+counts <- estimateGLMTrendedDisp(counts, design)
+counts <- estimateGLMTagwiseDisp(counts, design)
+
+#-----------------------------------------------------------------------#
+# step 2: now the data is normalised, we can extract our samples of interest for testing
+# and do this in a loopwise manner?
+
+# these are all the tests of plastic response, separated by temp, origin and year of sequencing
+plastic_pairs <- list(
+  c('A.Bra.1.29', 'A.Bra.1.23'), c('A.Bra.2.29', 'A.Bra.2.23'), c('A.Bra.1.29', 'A.Bra.1.35'), c('A.Bra.2.29', 'A.Bra.2.35'), 
+  c('A.Cal.1.29', 'A.Cal.1.23'), c('A.Cal.2.29', 'A.Cal.2.23'), c('A.Cal.1.29', 'A.Cal.1.35'), c('A.Cal.2.29', 'A.Cal.2.35'), 
+  c('A.Yem.1.29', 'A.Yem.1.23'), c('A.Yem.2.29', 'A.Yem.1.23.2'), c('A.Yem.1.29', 'A.Yem.1.35'), c('A.Yem.2.29', 'A.Yem.1.35.2'), 
+  c('A.Bra.1.29.n', 'A.Bra.1.23.n'), c('A.Bra.2.29.n', 'A.Bra.2.23.n'), c('A.Bra.1.29.n', 'A.Bra.1.35.n'), c('A.Bra.2.29.n', 'A.Bra.2.35.n'), 
+  c('A.Cal.1.29.n', 'A.Cal.1.23.n'), c('A.Cal.2.29.n', 'A.Cal.2.23.n'), c('A.Cal.1.29.n', 'A.Cal.1.35.n'), c('A.Cal.2.29.n', 'A.Cal.2.35.n'), 
+  c('A.Yem.1.29.n', 'A.Yem.1.23.n'), c('A.Yem.1.29.2.n', 'A.Yem.1.23.2.n'), c('A.Yem.1.29.n', 'A.Yem.1.35.n'), c('A.Yem.1.29.2.n', 'A.Yem.2.35.n')
+)
+
+# open an empty list to populate with results
+resulti <- list()
+
+
+# this loop is set up to perform pairwise log fold change tests on every pair of samples listed above
+# for the ~3700 genes we know are present in every sample
+for (i in 1:length(plastic_pairs)) {
+  samplepair <- plastic_pairs[[i]]
+  samplebase <- samplepair[1]
+  sampletret <- samplepair[2]
+  test_subset <- counts[ , samplepair, keep.lib.sizes=TRUE]
+  
+  files2 <- files %>% filter(Summary == samplebase | Summary == sampletret)
+  assays2 <- as.factor(files2$Assay)
+  regime2 <- as.factor(files2$Regime)
+  origin2 <- as.factor(files2$Origin)
+  batch2 <- as.factor(files2$Batch)
+  assays2 <- relevel(assays2, "29")
+  regime2 <- relevel(regime2, "Ancestral")
+  design2 <- model.matrix(~0 + assays2)
+  design_cols <- colnames(design2)
+  baseline <- design_cols[1]
+  treatment <- design_cols[2]
+
+  fit <- glmFit(test_subset, design2)
+  test_mat <- matrix(c(-1,1))
+  colnames(test_mat) <- paste(treatment, "-", baseline)
+  rownames(test_mat) <- paste(c(baseline, treatment))
+  res <- glmLRT(fit, contrast=test_mat)
+  
+  resulti[i] <- topTags(res, n = 7500)
+  
+}
+
+# this setup is the same as for the plastic list of pairs to check above, but with one important difference:
+# the pairs have been distributed in such a way as to avoid auto-correlation with the plastic response
+# by comparing the baseline from one replicate to the evolved population of another replicate.
+
+evol_pairs <- list(
+  c('A.Bra.2.23', 'C.Bra.1.23'), c('A.Bra.1.23', 'C.Bra.2.23'), c('A.Bra.2.35', 'H.Bra.1.35'), c('A.Bra.1.35', 'H.Bra.2.35'),
+  c('A.Cal.2.23', 'C.Cal.1.23'), c('A.Cal.1.23', 'C.Cal.2.23'), c('A.Cal.2.35', 'H.Cal.1.35'), c('A.Cal.1.35', 'H.Cal.2.35'),
+  c('A.Yem.1.23.2', 'C.Yem.1.23'), c('A.Yem.1.23', 'C.Yem.2.23'), c('A.Yem.1.35.2', 'H.Yem.1.35'), c('A.Yem.1.35', 'H.Yem.2.35'),
+  c('A.Bra.2.23.n', 'C.Bra.1.23.n'), c('A.Bra.1.23.n', 'C.Bra.2.23.n'), c('A.Bra.2.35.n', 'H.Bra.1.35.n'), c('A.Bra.1.35.n', 'H.Bra.2.35.n'),
+  c('A.Cal.2.23.n', 'C.Cal.1.23.n'), c('A.Cal.1.23.n', 'C.Cal.2.23.n'), c('A.Cal.2.35.n', 'H.Cal.1.35.n'), c('A.Cal.1.35.n', 'H.Cal.2.35.n'),
+  c('A.Yem.1.23.2.n', 'C.Yem.1.23.n'), c('A.Yem.1.23.n', 'C.Yem.2.23.n'), c('A.Yem.2.35.n', 'H.Yem.1.35.n'), c('A.Yem.1.35.n', 'H.Yem.2.35.n')
+) 
+
+resulto <- list()
+
+for (i in 1:length(evol_pairs)) {
+  samplepair <- evol_pairs[[i]]
+  samplebase <- samplepair[1]
+  sampletret <- samplepair[2]
+  test_subset <- counts[ , samplepair, keep.lib.sizes=TRUE]
+  
+  files2 <- files %>% filter(Summary == samplebase | Summary == sampletret)
+  assays2 <- as.factor(files2$Assay)
+  regime2 <- as.factor(files2$Regime)
+  origin2 <- as.factor(files2$Origin)
+  batch2 <- as.factor(files2$Batch)
+  regime2 <- relevel(regime2, "Ancestral")
+  design2 <- model.matrix(~0 + regime2)
+  design_cols <- colnames(design2)
+  baseline <- design_cols[1]
+  treatment <- design_cols[2]
+  
+  fit <- glmFit(test_subset, design2)
+  test_mat <- matrix(c(-1,1))
+  colnames(test_mat) <- paste(treatment, "-", baseline)
+  rownames(test_mat) <- paste(c(baseline, treatment))
+  res <- glmLRT(fit, contrast=test_mat)
+
+  resulto[i] <- topTags(res, n = 7500)
+  
+}
+
+#-----------------------------------------------------------------------#
+# now to build a loop to correlate each of these!
+setwd("~/Library/Mobile Documents/com~apple~CloudDocs/Documents/PostDoc Folder/Scripts & Code/ThermAdapt/2025/correlations")
+
+# finally, the relationships between plastic and evolved can be extracted and compared with the following code:
+# set your correlation of interest in the first two lines here, from 1-24
+test_plast <- resulti[[1]] # put 1:24 in here
+test_evol <- resulto[[1]] # match the number you put into the plast
+test_plast <- rownames_to_column(test_plast, "ID")
+test_evol <- rownames_to_column(test_evol, "ID")
+
+# joining together the plastic and evolved tests
+test_corr <- inner_join(test_plast, test_evol, by = c("ID" = "ID"))
+colnames(test_corr) <- c("ID", "PlastLogFC", "PlastLogCPM", "PlastLR", "PlastPVal", "PlastFDR",
+                         "EvolLogFC", "EvolLogCPM", "EvolLR", "EvolPVal", "EvolFDR")
+
+# genesvis just contains vector lists of genes significant in both plastic and evolved tests for each origin or all pops
+genesvis <- read.csv("genesvis.csv")
+geneset <- genesvis$Brazil_c # this is necessary because it only works with character vector 
+
+# filter to just look at genes important for both
+test_corr <- column_to_rownames(test_corr, var = "ID")
+geneset <- rownames(test_corr) %in% geneset
+test_corr <- test_corr[geneset,]
+
+cor.test(test_corr$PlastLogFC, test_corr$EvolLogFC)
+
+# quick vis
+x <- test_corr$EvolLogFC
+y <- test_corr$PlastLogFC
+plot(x,  y, 
+     xlab = "Genetic Response to Hot (LogFC)", ylab = "Plastic Response to Hot (LogFC)", 
+     pch = 20, frame = FALSE, col = "tomato2")#, col = alpha(sås, 0.5)) steelblue1 tomato2
+axis(1, at = 0, tck = 1, lty = 2, col = "gray")
+axis(2, at = 0, tck = 1, lty = 2, col = "gray")
+# textxy(-1, 3, "Compensation", cex = 1)
+# textxy(-1, -1.5, "Assimilation", cex = 1)
+# textxy(0.5, -1.5, "Compensation", cex = 1)
+# textxy(0.5, 3, "Assimilation", cex = 1)
+
+
+
+
+# euclidean distance loop?
+distance_results2 <- list()
+
+for (i in 1:length(plastic_pairs)) { 
+  euclid_p <- resulti[[i]]
+  euclid_e <- resulto[[i]]
+  
+  euclid_p <- rownames_to_column(euclid_p, "ID")
+  euclid_e <- rownames_to_column(euclid_e, "ID")
+  
+  test_dist <- inner_join(euclid_p, euclid_e, by = c("ID" = "ID"))
+  colnames(test_dist) <- c("ID", "PlastLogFC", "PlastLogCPM", "PlastLR", "PlastPVal", "PlastFDR",
+                           "EvolLogFC", "EvolLogCPM", "EvolLR", "EvolPVal", "EvolFDR")
+  
+  distence <- data.frame(test_dist$PlastLogFC, test_dist$EvolLogFC)
+  distence <- t(distence)
+  calc <- stats::dist(distence, method = "euclidean")
+  
+  distance_results2[i] <- calc
+  
+  }
+
+
+
+distence <- data.frame(test_corr$PlastLogFC, test_corr$EvolLogFC)
+distence <- t(distence)
+stats::dist(distence, method = "euclidean")
+
+
+
+
+
+
+
+
+
+
+
+
